@@ -343,7 +343,7 @@ def convert_mesh(obj, axis_conv_matrix):
             vg_attribs[g.group].values[i] = g.weight
 
     geo.point_attributes.extend(vg_attribs)
-
+    
     n_attrib = GeometryAttribute.normal()
     uv_attribs = [ GeometryAttribute.texturecoord(uv_layer.name) for uv_layer in me.uv_layers ]
     material_name_attrib = GeometryAttribute.string("material_name") 
@@ -378,7 +378,8 @@ def convert_mesh(obj, axis_conv_matrix):
         material_name_attrib.values.append(material_name)
 
     geo.vertex_attributes.extend(uv_attribs)
-    geo.vertex_attributes.append(n_attrib)
+    if len(n_attrib.values)>0:
+        geo.vertex_attributes.append(n_attrib)
 
     if len(material_name_attrib.values.string_list)>0:
         geo.primitive_attributes.append(material_name_attrib)
@@ -413,6 +414,9 @@ def convert_mesh(obj, axis_conv_matrix):
 
 
     eval_ob.to_mesh_clear()
+
+    if geo.primitive_count()==0:
+        return None
 
     converter = BgeoConverter()
     return converter.convert(geo)
@@ -461,6 +465,9 @@ def convert_mesh_shapekey(obj, axis_conv_matrix):
 
     eval_ob.to_mesh_clear()
 
+    if geo.primitive_count()==0:
+        return None
+
     converter = BgeoConverter()
     return converter.convert(geo)    
 
@@ -468,7 +475,6 @@ def convert(obj, axis_conv_matrix, for_shape_key):
     if obj.type in ("CAMERA", "LIGHT", "EMPTY"):
         return None
     elif obj.type == "CURVE":
-        # return None
         return convert_curve(obj, axis_conv_matrix)
     elif obj.type == "ARMATURE":
         return convet_armature(obj, axis_conv_matrix)
@@ -538,7 +544,8 @@ if __name__=="__main__":
 
     for obj in bpy.context.scene.objects:
 
-        bgeo_dict = dict()
+        bgeo_list = list() # name, type, bgeoのリスト 
+        name = get_outliner_path(obj) 
 
         if hasattr(obj.data, "shape_keys") and obj.data.shape_keys is not None:
 
@@ -552,18 +559,28 @@ if __name__=="__main__":
 
                 bgeo = convert(obj, axis_conv_matrix, i>0) # 0番目以外は最小情報で出力されるように 
                 if bgeo is not None:
-                    name = get_outliner_path(obj) + "." + shape_key.name
-                    bgeo_dict[name] = bgeo
+                    bgeo_list.append( (name+"." + shape_key.name, obj.type, bgeo) )
+
+                # curveだったらMeshに変換可能かテスト 
+                if obj.type == "CURVE":
+                    bgeo = convert_mesh(obj, axis_conv_matrix)
+                    if bgeo is not None:
+                        bgeo_list.append( (name+"." + shape_key.name, "MESH", bgeo) )
 
                 shape_key.value = 0.0
 
         else:
             bgeo = convert(obj, axis_conv_matrix, False)
             if bgeo is not None:
-                name = get_outliner_path(obj)
-                bgeo_dict[name] = bgeo
+                bgeo_list.append( (name, obj.type, bgeo) )
 
-        for name, bgeo in bgeo_dict.items():
+            # curveだったらMeshに変換可能かテスト 
+            if obj.type == "CURVE":
+                bgeo = convert_mesh(obj, axis_conv_matrix)
+                if bgeo is not None:
+                    bgeo_list.append( (name, "MESH", bgeo) )
+
+        for name, obj_type, bgeo in bgeo_list:
             
             # 確認用に個別でbgeo出力 
             # filepath = os.path.join(os.path.dirname(__file__), "..", "geo", name+".bgeo")
@@ -581,7 +598,7 @@ if __name__=="__main__":
             packed_geo = PackedGeoInfo()
             packed_geo.embed_id = "{:016x}".format(embed_id)
             packed_geo.bgeo = bgeo
-            packed_geo.type = obj.type
+            packed_geo.type = obj_type
             packed_geo.name = name
             packed_geo.position = loc[:]
             packed_geo.transform = [ matrix[i%3][i//3] for i in range(0, 9)]
